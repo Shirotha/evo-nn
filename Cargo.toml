@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/*",
+]
+
+[workspace.package]
+authors = ["Shirotha"]
+version = "0.1.0"
+edition = "2024"
+
+
+[package]
+name = "evo-nn"
+authors.workspace = true
+description = "evolutionary neural network"
+repository = "https://github.com/Shirotha/evo-nn"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+typed_floats = "1.0.1"

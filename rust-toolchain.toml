@@ -1,0 +1,11 @@
+[toolchain]
+channel = "nightly-2025-01-07"
+profile = "minimal"
+components = [
+    "rustfmt",
+    "clippy",
+    "rust-analyzer",
+    # "miri",
+    "rustc-codegen-cranelift-preview",
+    "llvm-tools-preview",
+]
