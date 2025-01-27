@@ -58,3 +58,4 @@
 #![feature(rustc_attrs)]
 
 pub mod agent;
+mod arena;

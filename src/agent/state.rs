@@ -1,6 +1,9 @@
 use std::{borrow::Borrow, mem::transmute};
 
-use super::{NeuronID, NeuronOrder, brain::*, connection::*, neuron::*};
+use thin_vec::ThinVec;
+
+use super::{NeuronID, NeuronOrder, body::*, brain::*, connection::*, neuron::*};
+use crate::arena::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Config<A, P, C>
@@ -14,16 +17,24 @@ where
     pub collector:  C::Config,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Interface {
+    Input(NeuronID),
+    Output(NeuronID),
+}
+
+#[derive(Debug)]
 pub struct State<'b, A, P, C>
 where
     A: Activator,
-    P: Propagator,
+    P: 'static + Propagator,
     C: Collector,
 {
     brain: &'b Brain<A, P>,
-    neuron_state: Vec<A>,
-    connection_state: Vec<P>,
+    neuron_state: Buffer<A>,
+    connection_state: Buffer<P>,
+    interface_order: Buffer<Interface>,
+    modulation_buffer: ThinVec<P::Input<'static>>,
     collector: C,
 }
 impl<'b, A, P, C> State<'b, A, P, C>
@@ -36,29 +47,26 @@ where
     P: 'static + for<'p> Propagator<Output<'p> = C::Input<'p>>,
     C: Collector,
 {
-    pub fn new(brain: &'b Brain<A, P>) -> Self {
-        let mut neuron_state = Vec::new();
-        neuron_state.resize_with(brain.neurons().len(), A::default);
-        let mut connection_state = Vec::new();
-        connection_state.resize_with(brain.connections().len(), P::default);
-        Self { brain, neuron_state, connection_state, collector: C::default() }
-    }
-
-    pub fn new_with(
-        brain: &'b Brain<A, P>,
-        mut neuron_state: Vec<A>,
-        mut connection_state: Vec<P>,
-        collector: C,
-    ) -> Self {
-        let neurons = brain.neurons().len();
-        neuron_state.truncate(neurons);
-        neuron_state.fill_with(A::default);
-        neuron_state.resize_with(neurons, A::default);
-        let connections = brain.connections().len();
-        connection_state.truncate(connections);
-        connection_state.fill_with(P::default);
-        connection_state.resize_with(connections, P::default);
-        Self { brain, neuron_state, connection_state, collector }
+    pub fn create_for<'a: 'b>(brain: &'b Brain<A, P>, body: &Body, arena: &'a mut Arena) -> Self {
+        // SAFETY: slices allocated by arena will never overlap each other
+        let neuron_state = arena.alloc_slice_with(brain.neurons().len(), A::default);
+        let connection_state = arena.alloc_slice_with(brain.connections().len(), P::default);
+        let sensors = body.sensor_neurons();
+        let actions = body.action_neurons();
+        let interface_order =
+            arena.alloc_slice_from_iter(brain.order().iter_used().filter_map(|neuron| {
+                sensors.binary_search(&neuron).ok().map(|_| Interface::Input(neuron)).or_else(
+                    || actions.binary_search(&neuron).ok().map(|_| Interface::Output(neuron)),
+                )
+            }));
+        Self {
+            brain,
+            neuron_state,
+            connection_state,
+            interface_order,
+            collector: C::default(),
+            modulation_buffer: ThinVec::new(),
+        }
     }
 
     fn get<'a>(neurons: &'a [A], order: &NeuronOrder, id: NeuronID) -> &'a A {
@@ -72,15 +80,15 @@ where
         collector: &mut C,
         neurons: &[A],
         order: &NeuronOrder,
-        buffer: &mut Vec<P::Input<'_>>,
+        buffer: &mut ThinVec<P::Input<'_>>,
         config: &Config<A, P, C>,
     ) {
         let input = neuron.output();
         // SAFETY: This is the only place where `buffer` is populated so it will always be empty here.
         // Changing the lifetime of the elements when they don't leak outside this function is always safe.
-        let buffer = unsafe {
-            transmute::<&mut std::vec::Vec<P::Input<'_>>, &mut Vec<P::Input<'_>>>(buffer)
-        };
+        let buffer =
+            unsafe { transmute::<&mut ThinVec<P::Input<'_>>, &mut ThinVec<P::Input<'_>>>(buffer) };
+        // TODO: does this run performant with len on the heap?
         buffer
             .extend(edge.1.modulation().map(|id| Self::get(neurons, order, *id.borrow()).output()));
         let edge = edge.1.propagate(input, buffer, &edge.0.propagator_gene, &config.propagator);
@@ -102,16 +110,14 @@ where
         for<'c> &'c I: Into<C::Input<'c>>,
         O: for<'a> From<A::Output<'a>>,
     {
-        assert!(inputs.len() == self.brain.inputs().len(), "wrong number of inputs");
-        assert!(outputs.len() == self.brain.outputs().len(), "wrong number of outputs");
-        let mut modulation_buffer = Vec::new();
-        let mut inputs = self.brain.inputs().iter().zip(inputs).peekable();
-        let mut outputs = self.brain.outputs().iter().zip(outputs).peekable();
+        let mut inputs = inputs.iter();
+        let mut outputs = outputs.iter_mut();
+        let mut interface = self.interface_order.iter().peekable();
         let mut connections =
-            self.brain.connections().iter().zip(&mut self.connection_state).peekable();
+            self.brain.connections().iter().zip(self.connection_state.iter_mut()).peekable();
         for (index, neuron) in self.brain.neurons().iter().enumerate() {
-            if let Some((_, input)) = inputs.next_if(|(i, _)| **i == neuron.id) {
-                self.collector.push(input.into(), &config.collector);
+            if interface.next_if(|i| **i == Interface::Input(neuron.id)).is_some() {
+                self.collector.push(inputs.next().expect("").into(), &config.collector);
             }
             while let Some(edge) = connections.next_if(|(conn, _)| conn.to == neuron.id) {
                 let state = Self::get(&self.neuron_state, self.brain.order(), edge.0.from);
@@ -121,7 +127,7 @@ where
                     &mut self.collector,
                     &self.neuron_state,
                     self.brain.order(),
-                    &mut modulation_buffer,
+                    &mut self.modulation_buffer,
                     config,
                 );
             }
@@ -129,8 +135,8 @@ where
             // indexing into `neuron_state` with an index received from enumerating `brain.neurons()` is always safe.
             let state = unsafe { self.neuron_state.get_unchecked_mut(index) };
             Self::activate(&mut self.collector, (neuron, state), config);
-            if let Some((_, output)) = outputs.next_if(|(o, _)| **o == neuron.id) {
-                *output = state.output().into();
+            if interface.next_if(|o| **o == Interface::Output(neuron.id)).is_some() {
+                *outputs.next().expect("output buffer is not big enough") = state.output().into();
             }
         }
     }
