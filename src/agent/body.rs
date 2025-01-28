@@ -40,12 +40,12 @@ where
         self.actions.iter().map(|action| action.neuron)
     }
 
-    pub fn sensors(&self) -> &[Sensor<P::SensorGene>] {
-        &self.sensors
+    pub fn iter_sensors(&self) -> impl Iterator<Item = &P::SensorGene> {
+        self.sensors.iter().map(|sensor| &sensor.gene)
     }
 
-    pub fn actions(&self) -> &[Action<P::ActionGene>] {
-        &self.actions
+    pub fn iter_actions(&self) -> impl Iterator<Item = &P::ActionGene> {
+        self.actions.iter().map(|action| &action.gene)
     }
 
     pub fn phenotype(&self) -> &P {

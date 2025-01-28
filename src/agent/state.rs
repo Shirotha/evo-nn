@@ -32,20 +32,19 @@ impl Interface {
 }
 
 #[derive(Debug)]
-pub struct State<'b, A, P, C>
+pub struct State<A, P, C>
 where
     A: Activator,
     P: 'static + Propagator,
     C: Collector,
 {
-    brain: &'b Brain<A, P>,
-    neuron_state: Buffer<A>,
-    connection_state: Buffer<P>,
-    interface_order: Buffer<Interface>,
+    neuron_state:      Buffer<A>,
+    connection_state:  Buffer<P>,
+    interface_order:   Buffer<Interface>,
     modulation_buffer: ThinVec<P::Input<'static>>,
-    collector: C,
+    collector:         C,
 }
-impl<'b, A, P, C> State<'b, A, P, C>
+impl<A, P, C> State<A, P, C>
 where
     //  P -> C -> A -> P
     //      /      \
@@ -55,10 +54,10 @@ where
     P: 'static + for<'p> Propagator<Output<'p> = C::Input<'p>>,
     C: Collector,
 {
-    pub fn create_for<'a: 'b, X: Phenotype>(
-        brain: &'b Brain<A, P>,
+    pub fn create_for<X: Phenotype>(
+        brain: &Brain<A, P>,
         body: &Body<X>,
-        arena: &'a mut Arena,
+        arena: &mut Arena,
     ) -> Self {
         let neuron_state = arena.alloc_slice_with(brain.neurons().len(), A::default);
         let connection_state = arena.alloc_slice_with(brain.connections().len(), P::default);
@@ -74,7 +73,6 @@ where
                 .expect("all interface neurons should be included in the order")
         });
         Self {
-            brain,
             neuron_state,
             connection_state,
             interface_order,
@@ -118,9 +116,13 @@ where
         collector.clear(&config.collector);
     }
 
-    // TODO: maybe store input/output buffer in here?
-    pub fn step<I, O>(&mut self, inputs: &[I], outputs: &mut [O], config: &Config<A, P, C>)
-    where
+    pub fn step<I, O>(
+        &mut self,
+        brain: &Brain<A, P>,
+        inputs: &[I],
+        outputs: &mut [O],
+        config: &Config<A, P, C>,
+    ) where
         for<'c> &'c I: Into<C::Input<'c>>,
         O: for<'a> From<A::Output<'a>>,
     {
@@ -128,19 +130,19 @@ where
         let mut outputs = outputs.iter_mut();
         let mut interface = self.interface_order.iter().peekable();
         let mut connections =
-            self.brain.connections().iter().zip(self.connection_state.iter_mut()).peekable();
-        for (index, neuron) in self.brain.neurons().iter().enumerate() {
+            brain.connections().iter().zip(self.connection_state.iter_mut()).peekable();
+        for (index, neuron) in brain.neurons().iter().enumerate() {
             if interface.next_if(|i| **i == Interface::Input(neuron.id)).is_some() {
                 self.collector.push(inputs.next().expect("").into(), &config.collector);
             }
             while let Some(edge) = connections.next_if(|(conn, _)| conn.to == neuron.id) {
-                let state = Self::get(&self.neuron_state, self.brain.order(), edge.0.from);
+                let state = Self::get(&self.neuron_state, brain.order(), edge.0.from);
                 Self::push(
                     state,
                     edge,
                     &mut self.collector,
                     &self.neuron_state,
-                    self.brain.order(),
+                    brain.order(),
                     &mut self.modulation_buffer,
                     config,
                 );

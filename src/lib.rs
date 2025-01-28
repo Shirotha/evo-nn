@@ -59,3 +59,4 @@
 
 pub mod agent;
 mod arena;
+pub mod world;

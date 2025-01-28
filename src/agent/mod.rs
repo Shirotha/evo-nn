@@ -1,19 +1,20 @@
-pub mod body;
-pub mod brain;
-pub mod connection;
-pub mod genome;
+mod body;
+mod brain;
+mod connection;
+mod genome;
 mod index;
-pub mod neuron;
-pub mod state;
+mod neuron;
+mod state;
 
-use body::*;
-use brain::*;
-use connection::*;
-use genome::*;
+pub use body::*;
+pub use brain::*;
+pub use connection::*;
+pub use genome::*;
 pub use index::*;
-use neuron::*;
+pub use neuron::*;
+pub use state::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Agent<G, P>
 where
     G: Genome,
@@ -22,4 +23,18 @@ where
     brain:  Brain<G::Activator, G::Propagator>,
     body:   Body<P>,
     genome: G,
+}
+
+impl<G, P> Agent<G, P>
+where
+    G: Genome,
+    P: Phenotype,
+{
+    pub fn brain(&self) -> &Brain<G::Activator, G::Propagator> {
+        &self.brain
+    }
+
+    pub fn body(&self) -> &Body<P> {
+        &self.body
+    }
 }
