@@ -2,7 +2,7 @@ use std::{borrow::Borrow, mem::transmute};
 
 use thin_vec::ThinVec;
 
-use super::{NeuronID, NeuronOrder, body::*, brain::*, connection::*, neuron::*};
+use super::*;
 use crate::arena::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -21,6 +21,14 @@ where
 enum Interface {
     Input(NeuronID),
     Output(NeuronID),
+}
+impl Interface {
+    pub fn into_id(self) -> NeuronID {
+        match self {
+            Self::Input(id) => id,
+            Self::Output(id) => id,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -47,18 +55,24 @@ where
     P: 'static + for<'p> Propagator<Output<'p> = C::Input<'p>>,
     C: Collector,
 {
-    pub fn create_for<'a: 'b>(brain: &'b Brain<A, P>, body: &Body, arena: &'a mut Arena) -> Self {
-        // SAFETY: slices allocated by arena will never overlap each other
+    pub fn create_for<'a: 'b, X: Phenotype>(
+        brain: &'b Brain<A, P>,
+        body: &Body<X>,
+        arena: &'a mut Arena,
+    ) -> Self {
         let neuron_state = arena.alloc_slice_with(brain.neurons().len(), A::default);
         let connection_state = arena.alloc_slice_with(brain.connections().len(), P::default);
-        let sensors = body.sensor_neurons();
-        let actions = body.action_neurons();
-        let interface_order =
-            arena.alloc_slice_from_iter(brain.order().iter_used().filter_map(|neuron| {
-                sensors.binary_search(&neuron).ok().map(|_| Interface::Input(neuron)).or_else(
-                    || actions.binary_search(&neuron).ok().map(|_| Interface::Output(neuron)),
-                )
-            }));
+        let mut interface_order = arena.alloc_slice_from_iter(
+            body.iter_sensor_neurons()
+                .map(Interface::Input)
+                .chain(body.iter_action_neurons().map(Interface::Output)),
+        );
+        interface_order.sort_by(|a, b| {
+            brain
+                .order()
+                .cmp(a.into_id(), b.into_id())
+                .expect("all interface neurons should be included in the order")
+        });
         Self {
             brain,
             neuron_state,

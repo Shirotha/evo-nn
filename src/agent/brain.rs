@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use thin_vec::ThinVec;
 
-use super::{NeuronOrder, connection::*, neuron::*};
+use super::*;
 
 #[derive(Clone, Debug)]
 pub struct Brain<A, P>
