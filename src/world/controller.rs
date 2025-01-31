@@ -24,7 +24,6 @@ where
     Kill(usize),
 }
 
-// TODO: add config
 pub trait Controller: Debug {
     type Phenotype: Phenotype;
     type State: Debug;
@@ -33,15 +32,21 @@ pub trait Controller: Debug {
     type Score;
     type SpawnHelper;
     type ParentIter: ExactSizeIterator<Item: Borrow<usize>>;
+    type Config: Debug;
 
-    // TODO: add config
-    fn initial_state(&self, phenotype: &Self::Phenotype) -> Self::State;
-    fn create_state(&self, phenotype: &Self::Phenotype, init: Self::SpawnHelper) -> Self::State;
+    fn initial_state(&self, phenotype: &Self::Phenotype, config: &Self::Config) -> Self::State;
+    fn create_state(
+        &self,
+        phenotype: &Self::Phenotype,
+        init: Self::SpawnHelper,
+        config: &Self::Config,
+    ) -> Self::State;
 
     fn read_sensors<'s>(
         &self,
         sensors: impl IntoIterator<Item = &'s <Self::Phenotype as Phenotype>::SensorGene>,
         outputs: &mut [Self::SensorOutput],
+        config: &Self::Config,
     ) where
         Self::Phenotype: 's;
 
@@ -49,16 +54,19 @@ pub trait Controller: Debug {
         &mut self,
         actions: impl IntoIterator<Item = &'a <Self::Phenotype as Phenotype>::ActionGene>,
         inputs: &[Self::ActionInput],
+        config: &Self::Config,
     ) -> Option<Self::Score>
     where
         Self::Phenotype: 'a;
 
     /// Advances the world state.
     /// Returns `None` when the cycle is complete.
+    #[allow(unused_variables)]
     fn step<G>(
         &mut self,
         agents: &[Agent<G, Self::Phenotype>],
         issue_command: impl FnMut(Command<Self>),
+        config: &Self::Config,
     ) -> Option<()>
     where
         G: Genome,

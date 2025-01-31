@@ -45,7 +45,7 @@ where
     }
 }
 
-pub trait Collector: Default {
+pub trait Collector: Debug + Default {
     /// Will be received from [`Propagator::Output`].
     type Input<'i>
     where
@@ -54,7 +54,7 @@ pub trait Collector: Default {
     type Output<'o>
     where
         Self: 'o;
-    type Config;
+    type Config: Debug;
     /// Adds new value into the [`Collector`].
     fn push(&mut self, input: Self::Input<'_>, config: &Self::Config);
     /// Returns the collected output.

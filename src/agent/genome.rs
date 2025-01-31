@@ -12,16 +12,19 @@ pub trait Genome: Debug + Clone {
         >;
     type Propagator: for<'p> Propagator<Output<'p> = <Self::Collector as Collector>::Input<'p>>;
     type Collector: Collector;
+    type Config: Debug;
 
     fn populate<P: Phenotype>(
         parents: impl IntoIterator<Item = (Self, Brain<Self::Activator, Self::Propagator>, Body<P>)>,
         parent_count: usize,
         children_count: usize,
+        config: &Self::Config,
     ) -> impl Iterator<Item = (Self, Brain<Self::Activator, Self::Propagator>, Body<P>)>;
 
     fn spawn<'a, P, I>(
         parents: I,
         count: usize,
+        config: &Self::Config,
     ) -> (Self, Brain<Self::Activator, Self::Propagator>, Body<P>)
     where
         P: 'a + Phenotype,

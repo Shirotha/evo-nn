@@ -45,11 +45,13 @@ where
         parents: impl IntoIterator<Item = Self>,
         parent_count: usize,
         children_count: usize,
+        config: &G::Config,
     ) -> impl Iterator<Item = Self> {
         G::populate(
             parents.into_iter().map(|agent| (agent.genome, agent.brain, agent.body)),
             parent_count,
             children_count,
+            config,
         )
         .map(|(genome, brain, body)| Self { genome, brain, body })
     }
@@ -57,15 +59,16 @@ where
     pub fn populate(
         parents: impl IntoIterator<IntoIter: ExactSizeIterator, Item = Self>,
         count: usize,
+        config: &G::Config,
     ) -> impl Iterator<Item = Self> {
         let parents = parents.into_iter();
         let parent_count = parents.size_hint().0;
-        unsafe { Self::populate_unchecked(parents, parent_count, count) }
+        unsafe { Self::populate_unchecked(parents, parent_count, count, config) }
     }
 
     /// # Safety
     /// Assumes that `parents` has at least `parent_count` elements.
-    pub unsafe fn spawn_unchecked<'a, I>(parents: I, count: usize) -> Self
+    pub unsafe fn spawn_unchecked<'a, I>(parents: I, count: usize, config: &G::Config) -> Self
     where
         I: IntoIterator<Item = &'a Self>,
         G: 'a,
@@ -74,11 +77,12 @@ where
         let (genome, brain, body) = G::spawn(
             parents.into_iter().map(|agent| (&agent.genome, &agent.brain, &agent.body)),
             count,
+            config,
         );
         Self { genome, brain, body }
     }
 
-    pub fn spawn<'a, I>(parents: I) -> Self
+    pub fn spawn<'a, I>(parents: I, config: &G::Config) -> Self
     where
         I: IntoIterator<IntoIter: ExactSizeIterator, Item = &'a Self>,
         G: 'a,
@@ -86,6 +90,6 @@ where
     {
         let parents = parents.into_iter();
         let count = parents.size_hint().0;
-        unsafe { Self::spawn_unchecked(parents, count) }
+        unsafe { Self::spawn_unchecked(parents, count, config) }
     }
 }
