@@ -64,6 +64,27 @@ impl Arena {
     }
 
     /// # Safety
+    /// Assumes that original buffer is not used anymore after moving.
+    pub unsafe fn move_into<T>(&mut self, items: &Buffer<T>) -> Buffer<T> {
+        let size = items.len() * size_of::<T>();
+        let start = self.next_aligned::<T>();
+        self.0.resize(start + size, 0);
+        // SAFETY: the nessesary amount of data was allocated beforehand
+        // also input and output types are the same, so copying their bytes is always valid
+        unsafe {
+            ptr::copy_nonoverlapping(
+                items.as_ptr() as *const u8,
+                self.0[start..].as_mut_ptr(),
+                size,
+            )
+        };
+        // SAFETY: results from `next_aligned` will always return aligned values
+        unsafe {
+            ManuallyDrop::new(ThinBoxedSlice::from_raw(cast_slice(&mut self.0[start..]) as *mut _))
+        }
+    }
+
+    /// # Safety
     /// This does not check for use after free cases.
     pub unsafe fn free_all(&mut self) {
         self.0.clear();

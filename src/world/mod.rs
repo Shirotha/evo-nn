@@ -1,56 +1,172 @@
-use crate::{agent::*, arena::Arena};
+use std::{borrow::Borrow, fmt::Debug};
+
+use crate::{
+    agent::{self, *},
+    arena::Arena,
+};
 
 mod controller;
 
 pub use controller::*;
 
-pub struct World<G, C>
+#[expect(type_alias_bounds)]
+type StoreRef<'s, G, C: Controller, S> = (&'s Agent<G, C::Phenotype>, &'s S);
+
+pub trait AgentStore<G, C>: Debug + Default
 where
     // NOTE: `'static` bound is required by generic associated types at the moment
     G: 'static + Genome,
     C: Controller,
 {
-    agents:        Vec<Agent<G, C::Phenotype>>,
-    state:         Vec<State<G::Activator, G::Propagator, G::Collector>>,
-    sensor_buffer: Vec<C::SensorOutput>,
-    action_buffer: Vec<C::ActionInput>,
-    controller:    C,
+    type Score: From<C::Score>;
+
+    fn insert(&mut self, agent: Agent<G, C::Phenotype>, score: Self::Score);
+    fn len(&self) -> usize;
+    fn best(&self) -> Option<StoreRef<G, C, Self::Score>>;
+    fn drain(&mut self) -> impl Iterator<Item = (Agent<G, C::Phenotype>, Self::Score)>;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    fn populate(&mut self, count: usize) -> impl Iterator<Item = Agent<G, C::Phenotype>> {
+        let len = self.len();
+        // SAFETY: `len` is always the count of items returned by `drain`
+        unsafe { Agent::populate_unchecked(self.drain().map(|(agent, _)| agent), len, count) }
+    }
 }
 
-impl<G, C> World<G, C>
+// FIXME: for some reason Propagator::Input is required to implement Debug?
+// #[derive(Debug)]
+pub struct State<G, C>
+where
+    G: 'static + Genome,
+    C: Controller,
+{
+    pub brain: agent::State<G::Activator, G::Propagator, G::Collector>,
+    pub body:  C::State,
+}
+
+pub struct World<G, C, S>
 where
     // NOTE: `'static` bound is required by generic associated types at the moment
     G: 'static + Genome,
     C: Controller,
+    S: AgentStore<G, C>,
+{
+    arena:          [Arena; 2],
+    agents:         Vec<Agent<G, C::Phenotype>>,
+    state:          Vec<State<G, C>>,
+    sensor_buffer:  Vec<C::SensorOutput>,
+    action_buffer:  Vec<C::ActionInput>,
+    command_buffer: Vec<Command<C>>,
+    controller:     C,
+    store:          S,
+}
+
+impl<G, C, S> World<G, C, S>
+where
+    // NOTE: `'static` bound is required by generic associated types at the moment
+    G: 'static + Genome,
+    C: Controller,
+    S: AgentStore<G, C>,
     for<'c> <G::Collector as Collector>::Input<'c>: From<&'c C::SensorOutput>,
     for<'p> C::ActionInput: From<<G::Propagator as Propagator>::Input<'p>>,
 {
-    // TODO: create world without agents
-    // TODO: should controller be Default?
-    pub fn from_population(
-        controller: C,
-        agents: Vec<Agent<G, C::Phenotype>>,
-        arena: &mut Arena,
-    ) -> Self {
-        let state = agents
-            .iter()
-            .map(|agent| State::create_for(agent.brain(), agent.body(), arena))
-            .collect();
-        Self { agents, state, sensor_buffer: Vec::new(), action_buffer: Vec::new(), controller }
+    pub fn new(controller: C) -> Self {
+        Self {
+            arena: [Arena::new(), Arena::new()],
+            agents: Vec::new(),
+            state: Vec::new(),
+            sensor_buffer: Vec::new(),
+            action_buffer: Vec::new(),
+            command_buffer: Vec::new(),
+            controller,
+            store: S::default(),
+        }
     }
 
-    pub fn step(&mut self, config: &Config<G::Activator, G::Propagator, G::Collector>) {
-        for (agent, state) in self.agents.iter().zip(self.state.iter_mut()) {
-            if self.controller.read_sensors(agent.body().iter_sensors(), &mut self.sensor_buffer) {
-                state.step(agent.brain(), &self.sensor_buffer, &mut self.action_buffer, config);
-                self.controller.perform_actions(agent.body().iter_actions(), &self.action_buffer);
+    pub fn initialize(&mut self) {
+        let len = self.agents.len();
+        // TODO: where to get count from (use config?)
+        self.agents.extend(self.store.populate(0));
+        self.state.extend(self.agents[len..].iter().map(|agent| State {
+            brain: agent::State::create_for(agent.brain(), agent.body(), &mut self.arena[0]),
+            body:  self.controller.initial_state(agent.body().phenotype()),
+        }))
+    }
+
+    pub fn step(
+        &mut self,
+        config: &Config<G::Activator, G::Propagator, G::Collector>,
+    ) -> Option<()> {
+        let mut i = 0;
+        while i < self.agents.len() {
+            // SAFETY: agent is always inbounds because of the loop condition
+            let agent = unsafe { self.agents.get_unchecked(i) };
+            // SAFETY: state has always the same length as agents
+            let state = unsafe { self.state.get_unchecked_mut(i) };
+            self.controller.read_sensors(agent.body().iter_sensors(), &mut self.sensor_buffer);
+            state.brain.step(agent.brain(), &self.sensor_buffer, &mut self.action_buffer, config);
+            if let Some(score) =
+                self.controller.perform_actions(agent.body().iter_actions(), &self.action_buffer)
+            {
+                let agent = self.agents.swap_remove(i);
+                self.store.insert(agent, score.into());
+                self.state.swap_remove(i);
+            } else {
+                i += 1;
             }
         }
-        // TODO: step world (should be able to create/destroy agents)
+        self.controller.step(&self.agents, |cmd| self.command_buffer.push(cmd))?;
+        for cmd in self.command_buffer.drain(..) {
+            match cmd {
+                Command::Spawn { parents, init } => {
+                    let agent = Agent::spawn(
+                        parents.map(|i| self.agents.get(*i.borrow()).expect("valid agent index")),
+                    );
+                    let state = State {
+                        brain: agent::State::create_for(
+                            agent.brain(),
+                            agent.body(),
+                            &mut self.arena[0],
+                        ),
+                        body:  self.controller.create_state(agent.body().phenotype(), init),
+                    };
+                    self.agents.push(agent);
+                    self.state.push(state);
+                },
+                Command::Kill(index) => {
+                    self.agents.swap_remove(index);
+                    self.state.swap_remove(index);
+                },
+            }
+        }
+        Some(())
+    }
+
+    pub fn finalize(&mut self) -> Option<StoreRef<G, C, S::Score>> {
+        // TODO: consider using an allocator that can reuse memory if this is not good enough
+        self.state.iter_mut().for_each(|state| state.brain.move_buffers(&mut self.arena[1]));
+        // SAFETY: all data was moved and arena is empty here
+        unsafe {
+            self.arena[0].free_all();
+        }
+        self.arena.swap(0, 1);
+        self.store.best()
+    }
+
+    pub fn cycle_par(&mut self, config: &Config<G::Activator, G::Propagator, G::Collector>)
+    where
+        C: Sync + NoGlobalStep,
+    {
+        self.initialize();
+        // TODO: run each agent in own task returning final score
+        //   each agent can have their own fixed sized sensor/action buffer
+        // TODO: batch add all agents to store
+        self.finalize();
     }
 
     pub fn agents(&self) -> &[Agent<G, C::Phenotype>] {
         &self.agents
     }
-    // TODO: function to process complete generation
 }

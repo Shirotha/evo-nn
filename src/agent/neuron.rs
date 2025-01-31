@@ -3,7 +3,7 @@ use std::fmt::{Debug, Display};
 use super::NeuronID;
 
 /// Per [`Neuron`] state during simulation.
-pub trait Activator: Default {
+pub trait Activator: Debug + Default {
     /// Will be received from [`Collector::Output`].
     type Input<'i>
     where

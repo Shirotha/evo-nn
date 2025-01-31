@@ -4,10 +4,12 @@ use thin_vec::ThinVec;
 
 use super::NeuronID;
 
+// TODO: add config
 pub trait Phenotype {
     type SensorGene: Debug + Clone;
     type ActionGene: Debug + Clone;
     // TODO: functions to use in Genome.populate for dealing with Body mutations
+    // make sure sensors and actions are sorted using `NeuronOrder::cmp`
 }
 
 #[derive(Debug, Clone)]
@@ -46,6 +48,14 @@ where
 
     pub fn iter_actions(&self) -> impl Iterator<Item = &P::ActionGene> {
         self.actions.iter().map(|action| &action.gene)
+    }
+
+    pub fn sensor_count(&self) -> usize {
+        self.sensors.len()
+    }
+
+    pub fn action_count(&self) -> usize {
+        self.actions.len()
     }
 
     pub fn phenotype(&self) -> &P {

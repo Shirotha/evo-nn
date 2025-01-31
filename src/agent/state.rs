@@ -61,6 +61,7 @@ where
     ) -> Self {
         let neuron_state = arena.alloc_slice_with(brain.neurons().len(), A::default);
         let connection_state = arena.alloc_slice_with(brain.connections().len(), P::default);
+        // TODO: since both sensors and actions are sorted in itself, this can be replaced by an interleave_by
         let mut interface_order = arena.alloc_slice_from_iter(
             body.iter_sensor_neurons()
                 .map(Interface::Input)
@@ -76,8 +77,17 @@ where
             neuron_state,
             connection_state,
             interface_order,
-            collector: C::default(),
             modulation_buffer: ThinVec::new(),
+            collector: C::default(),
+        }
+    }
+
+    pub fn move_buffers(&mut self, arena: &mut Arena) {
+        // SAFETY: original buffers get overwritten so old pointers are inaccessible
+        unsafe {
+            self.neuron_state = arena.move_into(&self.neuron_state);
+            self.connection_state = arena.move_into(&self.connection_state);
+            self.interface_order = arena.move_into(&self.interface_order);
         }
     }
 
@@ -133,7 +143,10 @@ where
             brain.connections().iter().zip(self.connection_state.iter_mut()).peekable();
         for (index, neuron) in brain.neurons().iter().enumerate() {
             if interface.next_if(|i| **i == Interface::Input(neuron.id)).is_some() {
-                self.collector.push(inputs.next().expect("").into(), &config.collector);
+                self.collector.push(
+                    inputs.next().expect("input buffer is not big enough").into(),
+                    &config.collector,
+                );
             }
             while let Some(edge) = connections.next_if(|(conn, _)| conn.to == neuron.id) {
                 let state = Self::get(&self.neuron_state, brain.order(), edge.0.from);
