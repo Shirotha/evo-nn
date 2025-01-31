@@ -19,7 +19,7 @@ where
     C: Controller,
 {
     type Score: From<C::Score>;
-    type Config: Debug;
+    type Config: Debug + Default;
 
     fn insert(&mut self, agent: Agent<G, C::Phenotype>, score: Self::Score);
     fn len(&self) -> usize;
@@ -43,8 +43,6 @@ where
     }
 }
 
-// FIXME: for some reason Propagator::Input is required to implement Debug?
-// #[derive(Debug)]
 pub struct State<G, C>
 where
     G: 'static + Genome,
@@ -54,7 +52,17 @@ where
     pub body:  C::State,
 }
 
-#[derive(Debug)]
+impl<G, C> Debug for State<G, C>
+where
+    G: 'static + Genome,
+    C: Controller,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("State").field("brain", &self.brain).field("body", &self.body).finish()
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct Config<G, C, S>
 where
     G: 'static + Genome,
@@ -66,6 +74,26 @@ where
     pub genome:     G::Config,
     pub store:      S::Config,
     pub world_size: u32,
+}
+
+impl<G, C, S> Clone for Config<G, C, S>
+where
+    G: 'static + Genome<Config: Clone>,
+    C: Controller<Config: Clone>,
+    S: AgentStore<G, C, Config: Clone>,
+    <G::Activator as Activator>::Config: Clone,
+    <G::Propagator as Propagator>::Config: Clone,
+    <G::Collector as Collector>::Config: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            brain:      self.brain.clone(),
+            body:       self.body.clone(),
+            genome:     self.genome.clone(),
+            store:      self.store.clone(),
+            world_size: self.world_size,
+        }
+    }
 }
 
 pub struct World<G, C, S>

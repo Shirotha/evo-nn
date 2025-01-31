@@ -15,7 +15,7 @@ pub trait Activator: Debug + Default {
     /// Additional data stored in the [`Neuron`] used during activation.
     type Gene: Debug + Clone;
     /// Additional global data used during activation.
-    type Config: Debug;
+    type Config: Debug + Default;
     /// Calculate the [`Neuron`] output using the weighted input of all connections.
     fn activate(&mut self, input: Self::Input<'_>, gene: &Self::Gene, config: &Self::Config);
     /// Retuns the current value of the [`Neuron`] output.

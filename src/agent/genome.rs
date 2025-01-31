@@ -12,7 +12,7 @@ pub trait Genome: Debug + Clone {
         >;
     type Propagator: for<'p> Propagator<Output<'p> = <Self::Collector as Collector>::Input<'p>>;
     type Collector: Collector;
-    type Config: Debug;
+    type Config: Debug + Default;
 
     fn populate<P: Phenotype>(
         parents: impl IntoIterator<Item = (Self, Brain<Self::Activator, Self::Propagator>, Body<P>)>,

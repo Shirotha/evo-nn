@@ -1,11 +1,11 @@
-use std::{borrow::Borrow, mem::transmute};
+use std::{borrow::Borrow, fmt::Debug, mem::transmute};
 
 use thin_vec::ThinVec;
 
 use super::*;
 use crate::arena::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default)]
 pub struct Config<A, P, C>
 where
     A: Activator,
@@ -15,6 +15,21 @@ where
     pub activator:  A::Config,
     pub propagator: P::Config,
     pub collector:  C::Config,
+}
+
+impl<A, P, C> Clone for Config<A, P, C>
+where
+    A: Activator<Config: Clone>,
+    P: Propagator<Config: Clone>,
+    C: Collector<Config: Clone>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            activator:  self.activator.clone(),
+            propagator: self.propagator.clone(),
+            collector:  self.collector.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,7 +46,6 @@ impl Interface {
     }
 }
 
-#[derive(Debug)]
 pub struct State<A, P, C>
 where
     A: Activator,
@@ -43,6 +57,22 @@ where
     interface_order:   Buffer<Interface>,
     modulation_buffer: ThinVec<P::Input<'static>>,
     collector:         C,
+}
+
+impl<A, P, C> Debug for State<A, P, C>
+where
+    A: Activator,
+    P: 'static + Propagator,
+    C: Collector,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("State")
+            .field("neuron_state", &self.neuron_state)
+            .field("connection_state", &self.connection_state)
+            .field("interface_order", &self.interface_order)
+            .field("collector", &self.collector)
+            .finish_non_exhaustive()
+    }
 }
 impl<A, P, C> State<A, P, C>
 where

@@ -32,7 +32,7 @@ pub trait Controller: Debug {
     type Score;
     type SpawnHelper;
     type ParentIter: ExactSizeIterator<Item: Borrow<usize>>;
-    type Config: Debug;
+    type Config: Debug + Default;
 
     fn initial_state(&self, phenotype: &Self::Phenotype, config: &Self::Config) -> Self::State;
     fn create_state(

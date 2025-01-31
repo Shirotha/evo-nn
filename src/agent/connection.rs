@@ -17,7 +17,7 @@ pub trait Propagator: Debug + Default {
     /// Additional data stored in the [`Connection`] used during propagation.
     type Gene: Debug + Clone;
     /// Additional global data used during propagation.
-    type Config: Debug;
+    type Config: Debug + Default;
     /// Returns iterator over [`NeuronID`] of modulation inputs.
     fn modulation(&self) -> impl Iterator<Item: Borrow<NeuronID>>;
     /// Calculates the value send to the connection target.
@@ -54,7 +54,7 @@ pub trait Collector: Debug + Default {
     type Output<'o>
     where
         Self: 'o;
-    type Config: Debug;
+    type Config: Debug + Default;
     /// Adds new value into the [`Collector`].
     fn push(&mut self, input: Self::Input<'_>, config: &Self::Config);
     /// Returns the collected output.
