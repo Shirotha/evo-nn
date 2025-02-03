@@ -9,12 +9,25 @@ mod neuron_id {
     impl NeuronID {
         pub(super) const MAX: u32 = 0xFFFFFF00;
 
+        #[cfg(not(test))]
         pub(super) fn try_from(id: u32) -> Option<Self> {
             // SAFETY: Values not larger than `MAX` are always safe to construct.
             (id <= Self::MAX).then_some(unsafe { Self(id) })
         }
 
+        #[cfg(test)]
+        pub fn try_from(id: u32) -> Option<Self> {
+            // SAFETY: Values not larger than `MAX` are always safe to construct.
+            (id <= Self::MAX).then_some(unsafe { Self(id) })
+        }
+
+        #[cfg(not(test))]
         pub(super) fn into_inner(self) -> u32 {
+            self.0
+        }
+
+        #[cfg(test)]
+        pub fn into_inner(self) -> u32 {
             self.0
         }
     }

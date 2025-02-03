@@ -141,8 +141,11 @@ where
         let buffer =
             unsafe { transmute::<&mut ThinVec<P::Input<'_>>, &mut ThinVec<P::Input<'_>>>(buffer) };
         // TODO: does this run performant with len on the heap?
-        buffer
-            .extend(edge.1.modulation().map(|id| Self::get(neurons, order, *id.borrow()).output()));
+        buffer.extend(
+            edge.1
+                .modulation(&edge.0.propagator_gene, &config.propagator)
+                .map(|id| Self::get(neurons, order, *id.borrow()).output()),
+        );
         let edge = edge.1.propagate(input, buffer, &edge.0.propagator_gene, &config.propagator);
         collector.push(edge, &config.collector);
         // NOTE: this is required by the assumption above
