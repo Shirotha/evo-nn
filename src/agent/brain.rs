@@ -1,5 +1,6 @@
-use std::fmt::Debug;
+use std::{collections::VecDeque, fmt::Debug};
 
+use bit_set::BitSet;
 use thin_vec::ThinVec;
 
 use super::*;
@@ -69,6 +70,7 @@ where
             neurons:     &mut self.neurons,
             connections: &mut self.connections,
             order:       &mut self.order,
+            inputs:      ThinVec::new(),
         }
     }
     // TODO: provide stable operations on `Brain`
@@ -83,6 +85,7 @@ where
     pub neurons:     &'b mut ThinVec<Neuron<A>>,
     pub connections: &'b mut ThinVec<Connection<P>>,
     pub order:       &'b mut NeuronOrder,
+    pub inputs:      ThinVec<NeuronID>,
 }
 impl<A, P> Drop for RawBrainAccess<'_, A, P>
 where
@@ -90,10 +93,37 @@ where
     P: Propagator,
 {
     fn drop(&mut self) {
-        todo!("fix invariants before returning data")
-        // - order neurons in topological order
-        // - create NeuronOrder using remap with neurons
-        // - apply remap to all NeuronIDs
-        // - order connections by NeuronID
+        let mut order = Vec::with_capacity(self.neurons.len());
+        let mut open = VecDeque::from_iter(
+            self.inputs
+                .iter()
+                .copied()
+                .map(|id| self.order.index(id).expect("all inputs should be in the ordering")),
+        );
+        let mut seen = BitSet::with_capacity(self.neurons.len());
+        seen.extend(open.iter().copied());
+        while let Some(current) = open.pop_front() {
+            let id = self.neurons[current].id;
+            order.push(id);
+            for next in self
+                .connections
+                .iter()
+                .enumerate()
+                .filter_map(|(i, conn)| (conn.from == id).then_some(i))
+            {
+                if seen.insert(next) {
+                    open.push_back(next);
+                }
+            }
+        }
+        let map = self.order.rebuild(order);
+        self.neurons.iter_mut().for_each(|neuron| neuron.id = map[&neuron.id]);
+        self.connections.iter_mut().for_each(|conn| {
+            conn.from = map[&conn.from];
+            conn.to = map[&conn.to];
+            P::remap_gene(&mut conn.propagator_gene, &map);
+        });
+        self.neurons.sort_unstable_by_key(|neuron| neuron.id);
+        self.connections.sort_unstable_by_key(|conn| conn.from);
     }
 }

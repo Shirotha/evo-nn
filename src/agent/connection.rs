@@ -1,5 +1,6 @@
 use std::{
     borrow::Borrow,
+    collections::HashMap,
     fmt::{Debug, Display},
 };
 
@@ -32,6 +33,9 @@ pub trait Propagator: Debug + Default {
         gene: &Self::Gene,
         config: &Self::Config,
     ) -> Self::Output<'_>;
+
+    #[expect(unused_variables)]
+    fn remap_gene(gene: &mut Self::Gene, map: &HashMap<NeuronID, NeuronID>) {}
 }
 
 #[derive(Debug, Clone)]

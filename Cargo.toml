@@ -19,6 +19,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+bit-set = "0.8.0"
 thin-slice = "0.1.1"
 thin-vec = { version = "0.2.13", features = ["serde"] }
 typed_floats = "1.0.1"
