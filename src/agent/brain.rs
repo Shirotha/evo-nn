@@ -105,14 +105,13 @@ where
         while let Some(current) = open.pop_front() {
             let id = self.neurons[current].id;
             order.push(id);
-            for next in self
-                .connections
-                .iter()
-                .enumerate()
-                .filter_map(|(i, conn)| (conn.from == id).then_some(i))
+            for next in
+                self.connections.iter().filter_map(|conn| (conn.from == id).then_some(conn.to))
             {
-                if seen.insert(next) {
-                    open.push_back(next);
+                let index =
+                    self.order.index(next).expect("all connections should be in the ordering");
+                if seen.insert(index) {
+                    open.push_back(index);
                 }
             }
         }
@@ -124,6 +123,100 @@ where
             P::remap_gene(&mut conn.propagator_gene, &map);
         });
         self.neurons.sort_unstable_by_key(|neuron| neuron.id);
-        self.connections.sort_unstable_by_key(|conn| conn.from);
+        self.connections.sort_by_key(|conn| conn.from);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[derive(Debug, Default)]
+    struct DummyData;
+    impl Activator for DummyData {
+        type Config = ();
+        type Gene = ();
+        type Input<'i>
+            = f64
+        where
+            Self: 'i;
+        type Output<'o>
+            = f64
+        where
+            Self: 'o;
+
+        fn activate(
+            &mut self,
+            _input: Self::Input<'_>,
+            _gene: &Self::Gene,
+            _config: &Self::Config,
+        ) {
+        }
+
+        fn output(&self) -> Self::Output<'_> {
+            0.0
+        }
+    }
+    impl Propagator for DummyData {
+        type Config = ();
+        type Gene = ();
+        type Input<'i>
+            = f64
+        where
+            Self: 'i;
+        type Output<'o>
+            = f64
+        where
+            Self: 'o;
+
+        fn modulation(
+            &self,
+            _gene: &Self::Gene,
+            _config: &Self::Config,
+        ) -> impl Iterator<Item: std::borrow::Borrow<NeuronID>> {
+            std::iter::empty::<NeuronID>()
+        }
+
+        fn propagate(
+            &mut self,
+            input: Self::Input<'_>,
+            _modulation: &[Self::Input<'_>],
+            _gene: &Self::Gene,
+            _config: &Self::Config,
+        ) -> Self::Output<'_> {
+            input
+        }
+    }
+    #[test]
+    fn raw_brain_access_leaves_brain_ordered() {
+        let mut brain = Brain::<DummyData, DummyData>::new();
+        {
+            let mut access = brain.raw();
+            let id0 = access.order.next_free(None).unwrap();
+            let id1 = access.order.next_free(Some(id0)).unwrap();
+            let id2 = access.order.next_free(Some(id1)).unwrap();
+            unsafe {
+                access.order.set_unchecked(id0, Some(0));
+                access.order.set_unchecked(id1, Some(1));
+                access.order.set_unchecked(id2, Some(2));
+            }
+            access.neurons.push(Neuron { id: id0, activator_gene: () });
+            access.neurons.push(Neuron { id: id1, activator_gene: () });
+            access.neurons.push(Neuron { id: id2, activator_gene: () });
+            access.connections.push(Connection { from: id1, to: id0, propagator_gene: () });
+            access.connections.push(Connection { from: id0, to: id1, propagator_gene: () });
+            access.connections.push(Connection { from: id0, to: id2, propagator_gene: () });
+            access.inputs.push(id1);
+        }
+        dbg!(&brain);
+        // FIXME: order has only single id and all ids in neurons/connections are all ID:0
+        let ids = brain.order().iter_used().collect::<Box<_>>();
+        let conns = brain.connections();
+        assert_eq!(ids[0], conns[0].from);
+        assert_eq!(ids[1], conns[0].to);
+        assert_eq!(ids[1], conns[1].from);
+        assert_eq!(ids[0], conns[1].to);
+        assert_eq!(ids[1], conns[2].from);
+        assert_eq!(ids[2], conns[2].to);
     }
 }
