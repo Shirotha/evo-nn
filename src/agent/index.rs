@@ -174,3 +174,78 @@ impl Default for NeuronOrder {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn order_can_reorder() {
+        let mut order = NeuronOrder::new();
+        let id0 = order.next_free(None).unwrap();
+        unsafe {
+            order.set_unchecked(id0, Some(0));
+        }
+        let id1 = order.next_free(Some(id0)).unwrap();
+        unsafe {
+            order.set_unchecked(id1, Some(1));
+        }
+        assert_eq!(Some(0), order.index(id0));
+        assert_eq!(Some(1), order.index(id1));
+        order.swap(id0, id1);
+        assert_eq!(Some(1), order.index(id0));
+        assert_eq!(Some(0), order.index(id1));
+    }
+
+    #[test]
+    fn order_can_truncate() {
+        let mut order = NeuronOrder::new();
+        let id0 = order.next_free(None).unwrap();
+        unsafe {
+            order.set_unchecked(id0, Some(0));
+        }
+        let id1 = order.next_free(Some(id0)).unwrap();
+        unsafe {
+            order.set_unchecked(id1, Some(1));
+        }
+        assert_eq!(2, order.iter_used().count());
+        unsafe {
+            order.set_unchecked(id1, None);
+        }
+        assert_eq!(1, order.iter_used().count());
+        assert_eq!(1, order.iter_free().count());
+        assert_eq!(Some(id0), order.truncate());
+        assert_eq!(0, order.iter_free().count());
+        assert_eq!(Some(id1), order.next_free(None));
+    }
+
+    #[test]
+    fn order_can_rebuild() {
+        let mut order = NeuronOrder::new();
+        let id0 = order.next_free(None).unwrap();
+        unsafe {
+            order.set_unchecked(id0, Some(0));
+        }
+        let id1 = order.next_free(Some(id0)).unwrap();
+        unsafe {
+            order.set_unchecked(id1, Some(1));
+        }
+        let map = order.rebuild([id1, id0]);
+        assert_eq!(2, map.len());
+        assert_eq!(id1, map[&id0]);
+        assert_eq!(id0, map[&id1]);
+    }
+
+    #[test]
+    fn order_can_create_from_any_index_type() {
+        let data = vec![1, 2, 0];
+        let map = NeuronOrder::build_mapping(data.iter().copied());
+        let mut order = NeuronOrder::new();
+        for i in &data {
+            unsafe {
+                order.set_unchecked(map[i], Some(*i as usize));
+            }
+        }
+        assert_eq!(std::cmp::Ordering::Equal, data.iter().map(|i| map[i]).cmp(order.iter_used()));
+    }
+}
