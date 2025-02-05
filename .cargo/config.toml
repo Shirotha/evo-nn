@@ -73,6 +73,7 @@ codegen-units = 256
 
 [profile.debugger]
 inherits = "dev"
+codegen-backend = "llvm"
 opt-level = 0
 debug = 2
 
