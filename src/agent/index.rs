@@ -105,13 +105,14 @@ mod neuron_order {
 
         /// Returns the next free [`NeuronID`] that is bigger than `start`.
         pub fn next_free(&self, start: Option<NeuronID>) -> Option<NeuronID> {
+            let offset = start.map(|id| id.into_inner() + 1).unwrap_or_default();
             self.0
                 .iter()
-                .skip(start.map(NeuronID::into_inner).unwrap_or_default() as usize)
+                .skip(offset as usize)
                 .enumerate()
                 .find(|(_, index)| index.is_none())
                 .and_then(|(id, _)| NeuronID::try_from(id as u32))
-                .or_else(|| NeuronID::try_from(self.0.len() as u32))
+                .or_else(|| NeuronID::try_from(offset.max(self.0.len() as u32)))
         }
 
         pub fn iter_used(&self) -> impl Iterator<Item = NeuronID> {

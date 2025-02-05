@@ -208,8 +208,6 @@ mod test {
             access.connections.push(Connection { from: id0, to: id2, propagator_gene: () });
             access.inputs.push(id1);
         }
-        dbg!(&brain);
-        // FIXME: order has only single id and all ids in neurons/connections are all ID:0
         let ids = brain.order().iter_used().collect::<Box<_>>();
         let conns = brain.connections();
         assert_eq!(ids[0], conns[0].from);
