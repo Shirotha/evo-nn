@@ -203,3 +203,239 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[derive(Debug)]
+    struct Signal {
+        kind:  SignalKind,
+        value: f64,
+    }
+    #[derive(Debug, Default)]
+    struct Cumulant {
+        pub data:    f64,
+        pub control: f64,
+    }
+    #[derive(Debug, Clone)]
+    struct NeuronGene {
+        pub speed: f64,
+    }
+    #[derive(Debug, Default)]
+    struct NeuronConfig {
+        pub activation_threshold: f64,
+    }
+    #[derive(Debug, Default)]
+    struct TestActivator {
+        pub state: f64,
+    }
+    impl Activator for TestActivator {
+        type Config = NeuronConfig;
+        type Gene = NeuronGene;
+        type Input<'i>
+            = &'i Cumulant
+        where
+            Self: 'i;
+        type Output<'o>
+            = f64
+        where
+            Self: 'o;
+
+        fn activate(&mut self, input: Self::Input<'_>, gene: &Self::Gene, config: &Self::Config) {
+            if input.control >= config.activation_threshold {
+                self.state += (input.data - self.state) * gene.speed;
+            } else {
+                self.state = 0.0;
+            }
+        }
+
+        fn output(&self) -> Self::Output<'_> {
+            self.state
+        }
+    }
+    #[derive(Debug, Clone, Copy)]
+    enum SignalKind {
+        Data,
+        Control,
+    }
+    #[derive(Debug, Clone)]
+    enum Weight {
+        Direct(f64),
+        Modulated(NeuronID),
+    }
+    #[derive(Debug, Clone)]
+    struct ConnectionGene {
+        kind:   SignalKind,
+        weight: Weight,
+    }
+    #[derive(Debug, Default)]
+    struct ConnectionConfig;
+    #[derive(Debug, Default)]
+    struct TestPropagator;
+    impl Propagator for TestPropagator {
+        type Config = ConnectionConfig;
+        type Gene = ConnectionGene;
+        type Input<'i>
+            = f64
+        where
+            Self: 'i;
+        type Output<'o>
+            = Signal
+        where
+            Self: 'o;
+
+        fn modulation(
+            &self,
+            gene: &Self::Gene,
+            _config: &Self::Config,
+        ) -> impl Iterator<Item: Borrow<NeuronID>> {
+            match gene.weight {
+                Weight::Direct(_) => None,
+                Weight::Modulated(id) => Some(id),
+            }
+            .into_iter()
+        }
+
+        fn propagate(
+            &mut self,
+            input: Self::Input<'_>,
+            modulation: &[Self::Input<'_>],
+            gene: &Self::Gene,
+            _config: &Self::Config,
+        ) -> Self::Output<'_> {
+            let value = match gene.weight {
+                Weight::Direct(w) => input * w,
+                Weight::Modulated(_) => input * modulation[0],
+            };
+            Signal { kind: gene.kind, value }
+        }
+    }
+    #[derive(Debug, Default)]
+    struct TestCollector {
+        state: Cumulant,
+    }
+    impl Collector for TestCollector {
+        type Config = ();
+        type Input<'i>
+            = Signal
+        where
+            Self: 'i;
+        type Output<'o>
+            = &'o Cumulant
+        where
+            Self: 'o;
+
+        fn push(&mut self, input: Self::Input<'_>, _config: &Self::Config) {
+            match input.kind {
+                SignalKind::Data => self.state.data += input.value,
+                SignalKind::Control => self.state.control += input.value,
+            }
+        }
+
+        fn collect(&mut self, _config: &Self::Config) -> Self::Output<'_> {
+            &self.state
+        }
+
+        fn clear(&mut self, _config: &Self::Config) {
+            self.state.data = 0.0;
+            self.state.control = 0.0;
+        }
+    }
+    struct TestPhenotype;
+    impl Phenotype for TestPhenotype {
+        type ActionGene = ();
+        type SensorGene = ();
+    }
+    type TestBrain = Brain<TestActivator, TestPropagator>;
+    type TestBody = Body<TestPhenotype>;
+    type TestConfig = Config<TestActivator, TestPropagator, TestCollector>;
+
+    fn run(brain: &TestBrain, body: &TestBody, config: &TestConfig, inputs: &[f64]) -> Vec<f64> {
+        let mut arena = Arena::new();
+        // FIXME: trait bounds not satisfied
+        // apparently Signal != Signal and &'i Cumulant != &'o Cumulant?
+        let mut state = State::create_for(brain, body, &mut arena);
+        let mut outputs = vec![0.0; body.action_count()];
+        state.step(brain, inputs, &mut outputs, config);
+        outputs
+    }
+
+    fn free_ids(order: &NeuronOrder, count: usize) -> Vec<NeuronID> {
+        let mut result = Vec::new();
+        if count == 0 {
+            return result;
+        }
+        let Some(mut current) = order.next_free(None) else { return result };
+        result.push(current);
+        if count == 1 {
+            return result;
+        }
+        while let Some(next) = order.next_free(Some(current)) {
+            result.push(next);
+            if result.len() == count {
+                return result;
+            }
+            current = next;
+        }
+        result
+    }
+
+    #[test]
+    fn xor() {
+        // inputs: <0>, <1>
+        // <2> = <0> mod <1>
+        // <3> = <0> + <1> if -1.0 * <2>
+        // outputs: <3>
+        let mut brain = TestBrain::new();
+        // TODO: construct body
+        let mut body = TestBody::new();
+        {
+            let mut access = brain.raw();
+            let ids = free_ids(&access.order, 4);
+            access.neurons.extend(
+                ids.iter()
+                    .copied()
+                    .map(|id| Neuron { id, activator_gene: NeuronGene { speed: 1.0 } }),
+            );
+            access.connections.push(Connection {
+                from: ids[0],
+                to: ids[2],
+                propagator_gene: ConnectionGene {
+                    kind:   SignalKind::Data,
+                    weight: Weight::Modulated(ids[1]),
+                },
+            });
+            access.connections.push(Connection {
+                from: ids[0],
+                to: ids[3],
+                propagator_gene: ConnectionGene {
+                    kind:   SignalKind::Data,
+                    weight: Weight::Direct(1.0),
+                },
+            });
+            access.connections.push(Connection {
+                from: ids[1],
+                to: ids[3],
+                propagator_gene: ConnectionGene {
+                    kind:   SignalKind::Data,
+                    weight: Weight::Direct(1.0),
+                },
+            });
+            access.connections.push(Connection {
+                from: ids[2],
+                to: ids[3],
+                propagator_gene: ConnectionGene {
+                    kind:   SignalKind::Control,
+                    weight: Weight::Direct(-1.0),
+                },
+            });
+            access.inputs.extend(ids.into_iter().take(2));
+        }
+        let config = TestConfig::default();
+        assert_eq!(run(&brain, &body, &config, &[0.0, 0.0]), vec![0.0]);
+        assert_eq!(run(&brain, &body, &config, &[1.0, 0.0]), vec![1.0]);
+        assert_eq!(run(&brain, &body, &config, &[0.0, 1.0]), vec![1.0]);
+        assert_eq!(run(&brain, &body, &config, &[1.0, 1.0]), vec![0.0]);
+    }
+}
